@@ -7,5 +7,8 @@
     "/Users/tonynguyen/hacknight/backend/.venv/lib/python3.13/site-packages"
   ],
   "python-envs.defaultEnvManager": "ms-python.python:system",
-  "python-envs.pythonProjects": []
+  "python-envs.pythonProjects": [],
+  "cursorpyright.analysis.extraPaths": [
+    "/Users/tonynguyen/hacknight/backend/.venv/lib/python3.13/site-packages"
+  ]
 }
