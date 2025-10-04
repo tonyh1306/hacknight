@@ -43,7 +43,7 @@ def analyze_food(image_name):
         print(f"Error processing image with OpenCV: {e}")
         exit()
 
-    prompt_text = "What is the name of this food? Amount seen in Picture? Calories of Food in Picture? Protein amount in food? Only answer the questions specifically. No need to repeat response questions. Only numbers/name"
+    prompt_text = "What is the name of this food? Calories of Food in Picture? Protein amount in food? Carbs? Fat? Fiber? Sodium? Insights? ReccomendationsOnly answer the questions specifically. No need to repeat response questions."
     multimodal_prompt = [prompt_text, image_part]
 
     try:
