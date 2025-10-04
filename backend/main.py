@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import cv2
 import tempfile
 import os
-from services.gemini import analyze_meds
+from services.gemini import analyze_food
 
 app = FastAPI()
 
@@ -22,8 +22,8 @@ class AnalyzeResponse(BaseModel):
     raw_output: dict
 
 
-@app.post("/analyze-meds", response_model=AnalyzeResponse)
-async def analyze_meds_endpoint(file: UploadFile = File(None), capture: bool = False):
+@app.post("/analyze-food", response_model=AnalyzeResponse)
+async def analyze_food_endpoint(file: UploadFile = File(None), capture: bool = False):
     """
     Either take an uploaded image file from Next.js,
     OR capture a photo directly with OpenCV if `capture=true`.
@@ -50,7 +50,7 @@ async def analyze_meds_endpoint(file: UploadFile = File(None), capture: bool = F
         image_path = tmp_path
 
     # Call Gemini analysis service
-    result = await analyze_meds(image_path)
+    result = await analyze_food(image_path)
 
     # cleanup
     os.remove(image_path)
