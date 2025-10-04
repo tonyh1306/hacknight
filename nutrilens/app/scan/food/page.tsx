@@ -1,82 +1,110 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { Navigation } from "@/components/navigation"
-import { Footer } from "@/components/footer"
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Camera, Upload, Loader2, Sparkles } from "lucide-react"
-import Link from "next/link"
-import Image from "next/image"
+import type React from "react";
+import { Navigation } from "@/components/navigation";
+import { Footer } from "@/components/footer";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Camera, Upload, Loader2, Sparkles } from "lucide-react";
+import Link from "next/link";
+import Image from "next/image";
 
 interface NutritionData {
-  foodName: string
-  calories: number
-  protein: number
-  carbs: number
-  fat: number
-  fiber: number
-  sodium: number
-  insights: string[]
-  recommendations: string[]
+  foodName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  sodium: number;
+  insights: string[];
+  recommendations: string[];
 }
 
 export default function FoodScannerPage() {
-  const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [nutritionData, setNutritionData] = useState<NutritionData | null>(null)
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [nutritionData, setNutritionData] = useState<NutritionData | null>(
+    null
+  );
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+    const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader()
+      const reader = new FileReader();
       reader.onloadend = () => {
-        setSelectedImage(reader.result as string)
-        setNutritionData(null)
-      }
-      reader.readAsDataURL(file)
+        setSelectedImage(reader.result as string);
+        setNutritionData(null);
+      };
+      reader.readAsDataURL(file);
     }
-  }
+  };
 
   const analyzeFood = async () => {
-    if (!selectedImage) return
+    if (!selectedImage) return;
 
-    setIsAnalyzing(true)
+    setIsAnalyzing(true);
 
     // Simulate AI analysis
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Mock data - in production, this would call the Gemini API
-    setNutritionData({
-      foodName: "Grilled Chicken Salad with Quinoa",
-      calories: 420,
-      protein: 35,
-      carbs: 42,
-      fat: 12,
-      fiber: 8,
-      sodium: 380,
-      insights: [
-        "High protein content supports muscle maintenance and satiety",
-        "Good balance of complex carbohydrates from quinoa",
-        "Low in saturated fats, heart-healthy meal choice",
-        "Excellent fiber content aids digestion",
-      ],
-      recommendations: [
-        "Consider adding avocado for healthy omega-3 fats",
-        "Reduce sodium by using less dressing or choosing low-sodium options",
-        "Pair with a piece of fruit for additional vitamins",
-      ],
-    })
+    try {
+      // Fetch data URL and convert to blob
+      const res = await fetch(selectedImage);
+      const blob = await res.blob();
+      const formData = new FormData();
+      formData.append("file", blob, "upload.jpg");
 
-    setIsAnalyzing(false)
-  }
+      // POST to backend analyze endpoint which calls Gemini service
+      const resp = await fetch("http://localhost:8000/analyze-food", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      const data = await resp.json();
+
+      // Map backend response into NutritionData
+      const nutrition: NutritionData = {
+        foodName: (data.text?.foodName as string) || "Unknown",
+        calories: Number(data.text?.calories) || 0,
+        protein: Number(data.text?.protein) || 0,
+        carbs: Number(data.text?.carbs) || 0,
+        fat: Number(data.text?.fat) || 0,
+        fiber: Number(data.text?.fiber) || 0,
+        sodium: Number(data.text?.sodium) || 0,
+        insights: (data.text?.insights as string[]) || [],
+        recommendations: (data.text?.recommendations as string[]) || [],
+      };
+
+      // If we only received an empty/default response, keep nutritionData null so UI shows placeholder
+      const looksEmpty =
+        nutrition.foodName === "Unknown" &&
+        nutrition.insights.length === 0 &&
+        nutrition.recommendations.length === 0;
+
+      if (!looksEmpty) {
+        setNutritionData(nutrition);
+      } else {
+        setNutritionData(null);
+      }
+    } catch (err) {
+      console.error("Analyze error", err);
+      alert("Failed to analyze medication. See console for details.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+
+    setIsAnalyzing(false);
+  };
 
   const resetScanner = () => {
-    setSelectedImage(null)
-    setNutritionData(null)
-    setIsAnalyzing(false)
-  }
+    setSelectedImage(null);
+    setNutritionData(null);
+    setIsAnalyzing(false);
+  };
 
   return (
     <>
@@ -90,9 +118,12 @@ export default function FoodScannerPage() {
                 <Camera className="w-4 h-4" />
                 <span>Food Analysis</span>
               </div>
-              <h1 className="text-4xl md:text-5xl font-bold mb-4">Analyze Your Meal</h1>
+              <h1 className="text-4xl md:text-5xl font-bold mb-4">
+                Analyze Your Meal
+              </h1>
               <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-                Upload a photo of your food to get instant nutritional insights and personalized recommendations
+                Upload a photo of your food to get instant nutritional insights
+                and personalized recommendations
               </p>
             </div>
 
@@ -108,7 +139,9 @@ export default function FoodScannerPage() {
                         </div>
                         <div className="text-center">
                           <p className="font-medium mb-1">Upload a photo</p>
-                          <p className="text-sm text-muted-foreground">or drag and drop</p>
+                          <p className="text-sm text-muted-foreground">
+                            or drag and drop
+                          </p>
                         </div>
                       </div>
 
@@ -129,7 +162,11 @@ export default function FoodScannerPage() {
                           onChange={handleImageUpload}
                         />
 
-                        <Button variant="outline" className="w-full bg-transparent" size="lg">
+                        <Button
+                          variant="outline"
+                          className="w-full bg-transparent"
+                          size="lg"
+                        >
                           <Camera className="w-5 h-5 mr-2" />
                           Take Photo
                         </Button>
@@ -148,7 +185,11 @@ export default function FoodScannerPage() {
 
                       <div className="space-y-3">
                         {!nutritionData && !isAnalyzing && (
-                          <Button className="w-full" size="lg" onClick={analyzeFood}>
+                          <Button
+                            className="w-full"
+                            size="lg"
+                            onClick={analyzeFood}
+                          >
                             <Sparkles className="w-5 h-5 mr-2" />
                             Analyze with AI
                           </Button>
@@ -161,7 +202,12 @@ export default function FoodScannerPage() {
                           </Button>
                         )}
 
-                        <Button variant="outline" className="w-full bg-transparent" size="lg" onClick={resetScanner}>
+                        <Button
+                          variant="outline"
+                          className="w-full bg-transparent"
+                          size="lg"
+                          onClick={resetScanner}
+                        >
                           Upload Different Image
                         </Button>
                       </div>
@@ -175,35 +221,55 @@ export default function FoodScannerPage() {
                 {nutritionData ? (
                   <>
                     <Card className="p-6 bg-card border-border">
-                      <h2 className="text-2xl font-bold mb-4">{nutritionData.foodName}</h2>
+                      <h2 className="text-2xl font-bold mb-4">
+                        {nutritionData.foodName}
+                      </h2>
 
                       <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-                          <p className="text-sm text-muted-foreground mb-1">Calories</p>
-                          <p className="text-3xl font-bold text-primary">{nutritionData.calories}</p>
+                          <p className="text-sm text-muted-foreground mb-1">
+                            Calories
+                          </p>
+                          <p className="text-3xl font-bold text-primary">
+                            {nutritionData.calories}
+                          </p>
                         </div>
                         <div className="p-4 rounded-lg bg-secondary/10 border border-secondary/20">
-                          <p className="text-sm text-muted-foreground mb-1">Protein</p>
-                          <p className="text-3xl font-bold text-secondary">{nutritionData.protein}g</p>
+                          <p className="text-sm text-muted-foreground mb-1">
+                            Protein
+                          </p>
+                          <p className="text-3xl font-bold text-secondary">
+                            {nutritionData.protein}g
+                          </p>
                         </div>
                       </div>
 
                       <div className="space-y-3">
                         <div className="flex items-center justify-between py-2 border-b border-border">
-                          <span className="text-muted-foreground">Carbohydrates</span>
-                          <span className="font-semibold">{nutritionData.carbs}g</span>
+                          <span className="text-muted-foreground">
+                            Carbohydrates
+                          </span>
+                          <span className="font-semibold">
+                            {nutritionData.carbs}g
+                          </span>
                         </div>
                         <div className="flex items-center justify-between py-2 border-b border-border">
                           <span className="text-muted-foreground">Fat</span>
-                          <span className="font-semibold">{nutritionData.fat}g</span>
+                          <span className="font-semibold">
+                            {nutritionData.fat}g
+                          </span>
                         </div>
                         <div className="flex items-center justify-between py-2 border-b border-border">
                           <span className="text-muted-foreground">Fiber</span>
-                          <span className="font-semibold">{nutritionData.fiber}g</span>
+                          <span className="font-semibold">
+                            {nutritionData.fiber}g
+                          </span>
                         </div>
                         <div className="flex items-center justify-between py-2">
                           <span className="text-muted-foreground">Sodium</span>
-                          <span className="font-semibold">{nutritionData.sodium}mg</span>
+                          <span className="font-semibold">
+                            {nutritionData.sodium}mg
+                          </span>
                         </div>
                       </div>
                     </Card>
@@ -214,19 +280,25 @@ export default function FoodScannerPage() {
                         {nutritionData.insights.map((insight, index) => (
                           <li key={index} className="flex items-start gap-3">
                             <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2 flex-shrink-0" />
-                            <span className="text-muted-foreground leading-relaxed">{insight}</span>
+                            <span className="text-muted-foreground leading-relaxed">
+                              {insight}
+                            </span>
                           </li>
                         ))}
                       </ul>
                     </Card>
 
                     <Card className="p-6 bg-card border-border">
-                      <h3 className="text-lg font-bold mb-4">Recommendations</h3>
+                      <h3 className="text-lg font-bold mb-4">
+                        Recommendations
+                      </h3>
                       <ul className="space-y-3">
                         {nutritionData.recommendations.map((rec, index) => (
                           <li key={index} className="flex items-start gap-3">
                             <div className="w-1.5 h-1.5 rounded-full bg-secondary mt-2 flex-shrink-0" />
-                            <span className="text-muted-foreground leading-relaxed">{rec}</span>
+                            <span className="text-muted-foreground leading-relaxed">
+                              {rec}
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -244,7 +316,9 @@ export default function FoodScannerPage() {
                       </div>
                       <div>
                         <h3 className="font-semibold mb-2">No analysis yet</h3>
-                        <p className="text-sm text-muted-foreground">Upload a photo of your meal to get started</p>
+                        <p className="text-sm text-muted-foreground">
+                          Upload a photo of your meal to get started
+                        </p>
                       </div>
                     </div>
                   </Card>
@@ -256,5 +330,5 @@ export default function FoodScannerPage() {
       </div>
       <Footer />
     </>
-  )
+  );
 }
