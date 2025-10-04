@@ -16,7 +16,6 @@ except Exception as e:
     print(f"Error initializing client. Check if GEMINI_API_KEY is set: {e}")
     exit()
 
-
 def analyze_food(image_name):
     #initialize image
     image_path = ".\\Backend\\services\\" + image_name

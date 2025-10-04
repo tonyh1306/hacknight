@@ -26,6 +26,87 @@ async def analyze_meds(image_path: str):
     """
     with open(image_path, "rb") as f:
         image_bytes = f.read()
+    # Consolidated heuristic parser used by OCR-first and fallbacks
+    def heuristic_parse(text: str):
+        out = {
+            "medicationName": "",
+            "genericName": "",
+            "dosage": "",
+            "frequency": "",
+            "instructions": [],
+            "warnings": [],
+            "sideEffects": [],
+            "plainLanguage": "",
+        }
+        if not text:
+            return out
+
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        if not lines:
+            return out
+
+        out["medicationName"] = lines[0]
+
+        # Find dosage patterns
+        import re
+        dose_rx = re.search(r"(\d+\s?(mg|ml|mcg|g)\b|\d+\s?units)", text, re.I)
+        if dose_rx:
+            out["dosage"] = dose_rx.group(0)
+
+        # Frequency keywords
+        freq_rx = re.search(r"(once daily|twice daily|every \d+ (hours|hrs)|daily|every day|at bedtime|as needed|prn|weekly|monthly)", text, re.I)
+        if freq_rx:
+            out["frequency"] = freq_rx.group(0)
+
+        # Instructions: lines that look like steps or start with numbers/bullets or appear substantive
+        instr = []
+        for l in lines[1:8]:
+            if re.match(r"^\d+\.|^-|^•|^\*", l) or len(l.split()) > 3:
+                instr.append(l)
+        out["instructions"] = instr
+
+        # Warnings / side effects heuristics
+        for l in lines:
+            if re.search(r"(warning|caution|avoid|do not|risk|contraindicat)", l, re.I):
+                out["warnings"].append(l)
+            if re.search(r"(side effect|nausea|dizziness|headache|rash|allergic)", l, re.I):
+                out["sideEffects"].append(l)
+
+        # Plain language: summarize first 2 lines as plain language fallback
+        out["plainLanguage"] = " ".join(lines[:2])
+        return out
+
+    # OCR-first fast path: try extracting text locally and return immediately if we get useful fields.
+    ocr_text = None
+    ocr_error = None
+    try:
+        from PIL import Image
+        import pytesseract
+
+        img = Image.open(image_path)
+        ocr_text = pytesseract.image_to_string(img)
+    except Exception as oe:
+        ocr_error = str(oe)
+
+    if ocr_text:
+        heuristic_parsed = heuristic_parse(ocr_text)
+        # Consider this a successful fast path if we extracted a medication name or dosage or any instructions
+        if any([
+            heuristic_parsed.get("medicationName"),
+            heuristic_parsed.get("dosage"),
+            heuristic_parsed.get("instructions"),
+        ]):
+            return {
+                "text": heuristic_parsed,
+                "raw_output": {
+                    "ocr_text": ocr_text,
+                    "ocr_error": ocr_error,
+                    "multimodal": None,
+                },
+                "diagnostics": {
+                    "fast_path": "ocr_first",
+                },
+            }
 
     # Call Gemini multimodal
     model = genai.GenerativeModel("gemini-1.5-flash")
@@ -168,18 +249,33 @@ async def analyze_meds(image_path: str):
             # prefer parsed_from_text, then heuristic_parsed
             final_parsed = parsed_from_text or heuristic_parsed
 
-            return {
-                "text": {
-                    "error": str(e),
-                    "available_models": models,
-                    "ocr_text": ocr_text,
-                    "ocr_error": ocr_error,
-                    "ocr_parsed": final_parsed,
-                    "text_model_output": text_model_output,
-                    "text_model_error": text_model_error,
-                },
-                "raw_output": {"error": str(e)},
-            }
+            # If we have a parsed object, return it at top-level under `text` so the frontend
+            # can reliably access fields like data.text.medicationName. Otherwise return an
+            # error object under text with diagnostics attached.
+            if final_parsed:
+                return {
+                    "text": final_parsed,
+                    "raw_output": {"error": str(e)},
+                    "diagnostics": {
+                        "available_models": models,
+                        "ocr_text": ocr_text,
+                        "ocr_error": ocr_error,
+                        "text_model_output": text_model_output,
+                        "text_model_error": text_model_error,
+                    },
+                }
+            else:
+                return {
+                    "text": {
+                        "error": str(e),
+                        "available_models": models,
+                        "ocr_text": ocr_text,
+                        "ocr_error": ocr_error,
+                        "text_model_output": text_model_output,
+                        "text_model_error": text_model_error,
+                    },
+                    "raw_output": {"error": str(e)},
+                }
         # Other exceptions - re-raise
         raise
 
