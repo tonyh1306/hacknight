@@ -50,52 +50,26 @@ export default function FoodScannerPage() {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     // Mock data - in production, this would call the Gemini API
-    try {
-      // Fetch data URL and convert to blob
-      const res = await fetch(selectedImage);
-      const blob = await res.blob();
-      const formData = new FormData();
-      formData.append("file", blob, "upload.jpg");
-
-      // POST to backend analyze endpoint which calls Gemini service
-      const resp = await fetch("http://localhost:8000/analyze-food", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-      const data = await resp.json();
-
-      // Map backend response into NutritionData
-      const nutrition: NutritionData = {
-        foodName: (data.text?.foodName as string) || "Unknown",
-        calories: Number(data.text?.calories) || 0,
-        protein: Number(data.text?.protein) || 0,
-        carbs: Number(data.text?.carbs) || 0,
-        fat: Number(data.text?.fat) || 0,
-        fiber: Number(data.text?.fiber) || 0,
-        sodium: Number(data.text?.sodium) || 0,
-        insights: (data.text?.insights as string[]) || [],
-        recommendations: (data.text?.recommendations as string[]) || [],
-      };
-
-      // If we only received an empty/default response, keep nutritionData null so UI shows placeholder
-      const looksEmpty =
-        nutrition.foodName === "Unknown" &&
-        nutrition.insights.length === 0 &&
-        nutrition.recommendations.length === 0;
-
-      if (!looksEmpty) {
-        setNutritionData(nutrition);
-      } else {
-        setNutritionData(null);
-      }
-    } catch (err) {
-      console.error("Analyze error", err);
-      alert("Failed to analyze medication. See console for details.");
-    } finally {
-      setIsAnalyzing(false);
-    }
+    setNutritionData({
+      foodName: "Banana",
+      calories: 105,
+      protein: 1.3,
+      carbs: 27,
+      fat: 0.3,
+      fiber: 3.1,
+      sodium: 1,
+      insights: [
+        "Rich in potassium, which supports healthy blood pressure",
+        "Provides quick-digesting carbohydrates for energy",
+        "Low in fat and sodium, making it heart-friendly",
+        "Contains dietary fiber to aid digestion",
+      ],
+      recommendations: [
+        "Pair with peanut butter for added protein and healthy fats",
+        "Add to smoothies for natural sweetness and creaminess",
+        "Combine with whole grains like oatmeal for a balanced meal",
+      ],
+    });
 
     setIsAnalyzing(false);
   };
