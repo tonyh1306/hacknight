@@ -18,10 +18,11 @@ app.add_middleware(
 )
 
 class AnalyzeResponse(BaseModel):
-    text: str
+    text: dict
     raw_output: dict
 
-@app.post("/scan/medication", response_model=AnalyzeResponse)
+
+@app.post("/analyze-meds", response_model=AnalyzeResponse)
 async def analyze_meds_endpoint(file: UploadFile = File(None), capture: bool = False):
     """
     Either take an uploaded image file from Next.js,

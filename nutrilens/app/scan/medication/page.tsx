@@ -3,17 +3,10 @@
 import type React from "react";
 import { Navigation } from "@/components/navigation";
 import { Footer } from "@/components/footer";
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Camera,
-  Upload,
-  Loader2,
-  Sparkles,
-  AlertTriangle,
-  Info,
-} from "lucide-react";
+import { Camera, Upload, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -28,190 +21,80 @@ interface MedicationData {
   plainLanguage: string;
 }
 
-type ResponseShape = { text?: Record<string, unknown> };
-
-// Small helpers to safely extract typed values from unknown response shapes
-const asString = (v: unknown): string => (typeof v === "string" ? v : "");
-const asStringArray = (v: unknown): string[] =>
-  Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
-
 export default function MedicationScannerPage() {
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [medicationData, setMedicationData] = useState<MedicationData | null>(
     null
   );
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showCameraModal, setShowCameraModal] = useState(false);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [lastResponse, setLastResponse] = useState<any | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setError(null);
-      setUploadProgress(null);
-      setSelectedImage(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewImage(reader.result as string);
+        setSelectedImage(reader.result as string);
         setMedicationData(null);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach((t) => t.stop());
-      }
-    };
-  }, [stream]);
+  const analyzeMedication = async () => {
+    if (!selectedImage) return;
 
-  // analyzeMedication now supports three flows:
-  // 1) capture=true -> server-side capture (existing)
-  // 2) selectedImage present -> upload File
-  // 3) pass a Blob (from local camera) as the "blob" argument
-  const analyzeMedication = async (capture: boolean = false, blob?: Blob) => {
     setIsAnalyzing(true);
-    setError(null);
-    setUploadProgress(null);
 
     try {
+      // Fetch data URL and convert to blob
+      const res = await fetch(selectedImage);
+      const blob = await res.blob();
       const formData = new FormData();
+      formData.append("file", blob, "upload.jpg");
 
-      if (blob) {
-        formData.append("file", blob, "capture.jpg");
-      } else if (!capture && selectedImage) {
-        formData.append("file", selectedImage);
-      }
+      // POST to backend analyze endpoint which calls Gemini service
+      const resp = await fetch("http://localhost:8000/analyze-meds", {
+        method: "POST",
+        body: formData,
+      });
 
-      const query = capture ? "?capture=true" : "";
+      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      const data = await resp.json();
+      setLastResponse(data);
 
-      // Use XMLHttpRequest when sending a file to get upload progress updates
-      const url = `http://localhost:8000/analyze-meds${query}`;
-      let responseJson: ResponseShape | null = null;
-
-      if (formData.has("file")) {
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", url);
-          xhr.onload = () => {
-            try {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                responseJson = JSON.parse(xhr.responseText) as ResponseShape;
-                resolve();
-              } else {
-                reject(new Error(`Server returned ${xhr.status}`));
-              }
-            } catch (e) {
-              reject(e);
-            }
-          };
-          xhr.onerror = () => reject(new Error("Network error"));
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              setUploadProgress(Math.round((e.loaded / e.total) * 100));
-            }
-          };
-          xhr.send(formData);
-        });
-      } else {
-        // No file in formData -> may be capture=true server-side path
-        const res = await fetch(url, { method: "POST" });
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
-        responseJson = (await res.json()) as ResponseShape;
-      }
-
-      const data = responseJson ?? {};
-
-      // Transform Gemini response into MedicationData structure (type-safe)
-      const text = data.text ?? {};
+      // Map backend response (expected shape: { text: { medicationName, genericName, dosage, frequency, instructions, warnings, sideEffects, plainLanguage } })
       const medData: MedicationData = {
-        medicationName:
-          asString((text as Record<string, unknown>).medicationName) ||
-          "Unknown",
-        genericName: asString((text as Record<string, unknown>).genericName),
-        dosage: asString((text as Record<string, unknown>).dosage),
-        frequency: asString((text as Record<string, unknown>).frequency),
-        instructions: asStringArray(
-          (text as Record<string, unknown>).instructions
-        ),
-        warnings: asStringArray((text as Record<string, unknown>).warnings),
-        sideEffects: asStringArray(
-          (text as Record<string, unknown>).sideEffects
-        ),
-        plainLanguage:
-          asString((text as Record<string, unknown>).plainLanguage) ||
-          asString((text as Record<string, unknown>).summary) ||
-          "",
+        medicationName: (data.text?.medicationName as string) || "Unknown",
+        genericName: (data.text?.genericName as string) || "",
+        dosage: (data.text?.dosage as string) || "",
+        frequency: (data.text?.frequency as string) || "",
+        instructions: (data.text?.instructions as string[]) || [],
+        warnings: (data.text?.warnings as string[]) || [],
+        sideEffects: (data.text?.sideEffects as string[]) || [],
+        plainLanguage: (data.text?.plainLanguage as string) || "",
       };
 
-      setMedicationData(medData);
-    } catch (err: unknown) {
-      console.error("Error analyzing medication:", err);
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message || "Failed to analyze medication. Please try again.");
+      // If we only received a plain text fallback (no structured fields), keep medicationData null and show diagnostics
+      const looksEmpty =
+        medData.medicationName === "Unknown" &&
+        medData.instructions.length === 0 &&
+        medData.plainLanguage === "";
+      if (!looksEmpty) {
+        setMedicationData(medData);
+      } else {
+        setMedicationData(null);
+      }
+    } catch (err) {
+      console.error("Analyze error", err);
+      alert("Failed to analyze medication. See console for details.");
     } finally {
       setIsAnalyzing(false);
-      setUploadProgress(null);
-    }
-  };
-
-  const openCamera = async () => {
-    setError(null);
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      setStream(s);
-      setShowCameraModal(true);
-      if (videoRef.current) videoRef.current.srcObject = s;
-    } catch (e: unknown) {
-      console.error("Camera error", e);
-      setError(e instanceof Error ? e.message : "Unable to access camera");
-    }
-  };
-
-  const closeCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-      setStream(null);
-    }
-    setShowCameraModal(false);
-  };
-
-  const takePhoto = async () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = canvasRef.current || document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.9)
-    );
-    if (blob) {
-      // preview
-      const url = URL.createObjectURL(blob);
-      setPreviewImage(url);
-      setSelectedImage(null);
-      setMedicationData(null);
-      closeCamera();
-      await analyzeMedication(false, blob);
     }
   };
 
   const resetScanner = () => {
     setSelectedImage(null);
-    setPreviewImage(null);
     setMedicationData(null);
     setIsAnalyzing(false);
   };
@@ -224,16 +107,16 @@ export default function MedicationScannerPage() {
           <div className="max-w-5xl mx-auto">
             {/* Title */}
             <div className="text-center mb-12">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-secondary/10 border border-secondary/20 text-secondary text-sm font-medium mb-4">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-4">
                 <Camera className="w-4 h-4" />
-                <span>Medication Scanner</span>
+                <span>Medication Analysis</span>
               </div>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                Scan Your Medication
+                Analyze Your Medication
               </h1>
               <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-                Upload a photo of your medication label to get clear,
-                easy-to-understand instructions and safety information
+                Upload a photo of your medication label to get clear
+                instructions, warnings, and plain-language explanations
               </p>
             </div>
 
@@ -241,29 +124,25 @@ export default function MedicationScannerPage() {
               {/* Upload Section */}
               <div className="space-y-6">
                 <Card className="p-8 bg-card border-border">
-                  {!previewImage ? (
+                  {!selectedImage ? (
                     <div className="space-y-6">
-                      <div className="aspect-square rounded-xl border-2 border-dashed border-border bg-muted/20 flex flex-col items-center justify-center gap-4 hover:border-secondary/50 transition-colors">
-                        <div className="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center">
-                          <Camera className="w-8 h-8 text-secondary" />
+                      <div className="aspect-square rounded-xl border-2 border-dashed border-border bg-muted/20 flex flex-col items-center justify-center gap-4 hover:border-primary/50 transition-colors">
+                        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                          <Camera className="w-8 h-8 text-primary" />
                         </div>
                         <div className="text-center">
                           <p className="font-medium mb-1">
-                            Upload medication label
+                            Upload a medication label
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            Clear photo of the label works best
+                            or drag and drop
                           </p>
                         </div>
                       </div>
 
                       <div className="space-y-3">
-                        <label htmlFor="med-file-upload">
-                          <Button
-                            className="w-full bg-secondary hover:bg-secondary/90"
-                            size="lg"
-                            asChild
-                          >
+                        <label htmlFor="file-upload">
+                          <Button className="w-full" size="lg" asChild>
                             <span>
                               <Upload className="w-5 h-5 mr-2" />
                               Choose Image
@@ -271,7 +150,7 @@ export default function MedicationScannerPage() {
                           </Button>
                         </label>
                         <input
-                          id="med-file-upload"
+                          id="file-upload"
                           type="file"
                           accept="image/*"
                           className="hidden"
@@ -282,29 +161,18 @@ export default function MedicationScannerPage() {
                           variant="outline"
                           className="w-full bg-transparent"
                           size="lg"
-                          onClick={openCamera}
                         >
                           <Camera className="w-5 h-5 mr-2" />
-                          Capture with Camera
+                          Take Photo
                         </Button>
-                        {uploadProgress !== null && (
-                          <p className="text-sm text-muted-foreground mt-2">
-                            Uploading: {uploadProgress}%
-                          </p>
-                        )}
-                        {error && (
-                          <p className="text-sm text-destructive mt-2">
-                            {error}
-                          </p>
-                        )}
                       </div>
                     </div>
                   ) : (
                     <div className="space-y-6">
                       <div className="relative aspect-square rounded-xl overflow-hidden bg-muted">
                         <Image
-                          src={previewImage || "/placeholder.svg"}
-                          alt="Selected medication label"
+                          src={selectedImage || "/placeholder.svg"}
+                          alt="Selected medication"
                           fill
                           className="object-cover"
                         />
@@ -313,21 +181,17 @@ export default function MedicationScannerPage() {
                       <div className="space-y-3">
                         {!medicationData && !isAnalyzing && (
                           <Button
-                            className="w-full bg-secondary hover:bg-secondary/90"
+                            className="w-full"
                             size="lg"
-                            onClick={() => analyzeMedication(false)}
+                            onClick={analyzeMedication}
                           >
                             <Sparkles className="w-5 h-5 mr-2" />
-                            Analyze Label
+                            Analyze with AI
                           </Button>
                         )}
 
                         {isAnalyzing && (
-                          <Button
-                            className="w-full bg-secondary hover:bg-secondary/90"
-                            size="lg"
-                            disabled
-                          >
+                          <Button className="w-full" size="lg" disabled>
                             <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                             Analyzing...
                           </Button>
@@ -345,18 +209,6 @@ export default function MedicationScannerPage() {
                     </div>
                   )}
                 </Card>
-
-                {/* Disclaimer */}
-                <Card className="p-4 bg-muted/50 border-border">
-                  <div className="flex items-start gap-3">
-                    <Info className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      This tool provides general information only. Always
-                      consult your healthcare provider for medical advice and
-                      follow their instructions.
-                    </p>
-                  </div>
-                </Card>
               </div>
 
               {/* Results Section */}
@@ -364,77 +216,63 @@ export default function MedicationScannerPage() {
                 {medicationData ? (
                   <>
                     <Card className="p-6 bg-card border-border">
-                      <div className="mb-6">
-                        <h2 className="text-2xl font-bold mb-2">
-                          {medicationData.medicationName}
-                        </h2>
-                        <p className="text-muted-foreground">
-                          Generic: {medicationData.genericName}
-                        </p>
-                      </div>
+                      <h2 className="text-2xl font-bold mb-4">
+                        {medicationData.medicationName}
+                      </h2>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-4 rounded-lg bg-secondary/10 border border-secondary/20">
+                      <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
                           <p className="text-sm text-muted-foreground mb-1">
                             Dosage
                           </p>
-                          <p className="text-2xl font-bold text-secondary">
+                          <p className="text-3xl font-bold text-primary">
                             {medicationData.dosage}
                           </p>
                         </div>
-                        <div className="p-4 rounded-lg bg-accent/10 border border-accent/20">
+                        <div className="p-4 rounded-lg bg-secondary/10 border border-secondary/20">
                           <p className="text-sm text-muted-foreground mb-1">
                             Frequency
                           </p>
-                          <p className="text-2xl font-bold text-accent">
+                          <p className="text-3xl font-bold text-secondary">
                             {medicationData.frequency}
                           </p>
                         </div>
                       </div>
-                    </Card>
 
-                    <Card className="p-6 bg-card border-border">
-                      <h3 className="text-lg font-bold mb-4">
-                        In Plain Language
-                      </h3>
-                      <p className="text-muted-foreground leading-relaxed">
-                        {medicationData.plainLanguage}
-                      </p>
-                    </Card>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between py-2 border-b border-border">
+                          <span className="text-muted-foreground">Generic</span>
+                          <span className="font-semibold">
+                            {medicationData.genericName}
+                          </span>
+                        </div>
 
-                    <Card className="p-6 bg-card border-border">
-                      <h3 className="text-lg font-bold mb-4">How to Take</h3>
-                      <ul className="space-y-3">
-                        {medicationData.instructions.map(
-                          (instruction, index) => (
-                            <li key={index} className="flex items-start gap-3">
-                              <div className="w-6 h-6 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                                <span className="text-xs font-semibold text-secondary">
-                                  {index + 1}
-                                </span>
-                              </div>
-                              <span className="text-muted-foreground leading-relaxed">
-                                {instruction}
-                              </span>
-                            </li>
-                          )
-                        )}
-                      </ul>
-                    </Card>
+                        <div className="flex items-center justify-between py-2 border-b border-border">
+                          <span className="text-muted-foreground">
+                            Side Effects
+                          </span>
+                          <span className="font-semibold">
+                            {medicationData.sideEffects.join(", ")}
+                          </span>
+                        </div>
 
-                    <Card className="p-6 bg-card border-destructive/20">
-                      <div className="flex items-center gap-2 mb-4">
-                        <AlertTriangle className="w-5 h-5 text-destructive" />
-                        <h3 className="text-lg font-bold">
-                          Important Warnings
-                        </h3>
+                        <div className="flex items-center justify-between py-2">
+                          <span className="text-muted-foreground">Extra</span>
+                          <span className="font-semibold">
+                            See details below
+                          </span>
+                        </div>
                       </div>
+                    </Card>
+
+                    <Card className="p-6 bg-card border-border">
+                      <h3 className="text-lg font-bold mb-4">AI Insights</h3>
                       <ul className="space-y-3">
-                        {medicationData.warnings.map((warning, index) => (
+                        {medicationData.instructions.map((insight, index) => (
                           <li key={index} className="flex items-start gap-3">
-                            <div className="w-1.5 h-1.5 rounded-full bg-destructive mt-2 flex-shrink-0" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2 flex-shrink-0" />
                             <span className="text-muted-foreground leading-relaxed">
-                              {warning}
+                              {insight}
                             </span>
                           </li>
                         ))}
@@ -442,26 +280,20 @@ export default function MedicationScannerPage() {
                     </Card>
 
                     <Card className="p-6 bg-card border-border">
-                      <h3 className="text-lg font-bold mb-4">
-                        Possible Side Effects
-                      </h3>
+                      <h3 className="text-lg font-bold mb-4">Warnings</h3>
                       <ul className="space-y-3">
-                        {medicationData.sideEffects.map((effect, index) => (
+                        {medicationData.warnings.map((rec, index) => (
                           <li key={index} className="flex items-start gap-3">
-                            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground mt-2 flex-shrink-0" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-secondary mt-2 flex-shrink-0" />
                             <span className="text-muted-foreground leading-relaxed">
-                              {effect}
+                              {rec}
                             </span>
                           </li>
                         ))}
                       </ul>
                     </Card>
 
-                    <Button
-                      className="w-full bg-secondary hover:bg-secondary/90"
-                      size="lg"
-                      asChild
-                    >
+                    <Button className="w-full" size="lg" asChild>
                       <Link href="/dashboard">Save to Dashboard</Link>
                     </Button>
                   </>
@@ -478,6 +310,21 @@ export default function MedicationScannerPage() {
                         </p>
                       </div>
                     </div>
+                  </Card>
+                )}
+                {/* Diagnostics: show raw backend response when structured data is missing */}
+                {!medicationData && lastResponse && (
+                  <Card className="p-6 bg-card border-border mt-4">
+                    <h3 className="text-lg font-bold mb-2">
+                      Analysis Diagnostics
+                    </h3>
+                    <div className="text-sm text-muted-foreground mb-3">
+                      The AI response did not include parsed medication fields.
+                      Raw response:
+                    </div>
+                    <pre className="text-xs bg-muted p-3 rounded overflow-auto max-h-64">
+                      {JSON.stringify(lastResponse, null, 2)}
+                    </pre>
                   </Card>
                 )}
               </div>

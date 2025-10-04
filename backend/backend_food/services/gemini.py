@@ -2,12 +2,16 @@ import cv2
 import numpy as np
 from google import genai
 from google.genai.types import Part # Import the Part type for binary data
+from dotenv import load_dotenv
+import os
 
-API_KEY = "AIzaSyD35pWwg7e142SKbw6sJC6S4-DqZQWT-6s" 
+load_dotenv()
+
+api_key = os.getenv("API_KEY")
 
 # --- 1. API Client Setup (Same as before) ---
 try:
-    client = genai.Client(api_key=API_KEY)
+    client = genai.Client(api_key=api_key)
 except Exception as e:
     print(f"Error initializing client. Check if GEMINI_API_KEY is set: {e}")
     exit()
