@@ -1,10 +1,20 @@
 import google.generativeai as genai
 import base64
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Access the API key
+api_key = os.getenv("API_KEY")
+
+# You can now use api_key in your code
+print(f"Your API Key: {api_key}")
 
 # Initialize Gemini client
-genai.configure(api_key="AIzaSyD35pWwg7e142SKbw6sJC6S4-DqZQWT-6s")
 
-
+genai.configure(api_key=api_key)
 
 async def analyze_meds(image_path: str):
     """
