@@ -72,8 +72,112 @@ async def analyze_meds(image_path: str):
             except Exception:
                 models = None
 
+            # Try OCR fallback since multimodal model is not available
+            ocr_text = None
+            ocr_error = None
+            heuristic_parsed = None
+            try:
+                from PIL import Image
+                import pytesseract
+
+                img = Image.open(image_path)
+                ocr_text = pytesseract.image_to_string(img)
+            except Exception as oe:
+                ocr_error = str(oe)
+
+            # local heuristic parser
+            def _heuristic_parse(text: str):
+                import re
+                out = {
+                    "medicationName": "",
+                    "genericName": "",
+                    "dosage": "",
+                    "frequency": "",
+                    "instructions": [],
+                    "warnings": [],
+                    "sideEffects": [],
+                    "plainLanguage": "",
+                }
+                if not text:
+                    return out
+                lines = [l.strip() for l in text.splitlines() if l.strip()]
+                if not lines:
+                    return out
+                out["medicationName"] = lines[0]
+                dose_rx = re.search(r"(\d+\s?(mg|ml|mcg|g)\b|\d+\s?units)", text, re.I)
+                if dose_rx:
+                    out["dosage"] = dose_rx.group(0)
+                freq_rx = re.search(r"(once daily|twice daily|every \d+ (hours|hrs)|daily|every day|at bedtime|as needed|prn|weekly|monthly)", text, re.I)
+                if freq_rx:
+                    out["frequency"] = freq_rx.group(0)
+                instr = []
+                for l in lines[1:8]:
+                    if re.match(r"^\d+\.|^-|^•|^\*", l) or len(l.split()) > 3:
+                        instr.append(l)
+                out["instructions"] = instr
+                for l in lines:
+                    if re.search(r"(warning|caution|avoid|do not|risk|contraindicat)", l, re.I):
+                        out["warnings"].append(l)
+                    if re.search(r"(side effect|nausea|dizziness|headache|rash|allergic)", l, re.I):
+                        out["sideEffects"].append(l)
+                out["plainLanguage"] = " ".join(lines[:2])
+                return out
+
+            if ocr_text:
+                heuristic_parsed = _heuristic_parse(ocr_text)
+
+            # Try calling a text-capable model on OCR text to get strict JSON
+            text_model_output = None
+            text_model_error = None
+            parsed_from_text = None
+            if ocr_text:
+                try:
+                    text_model = genai.GenerativeModel()
+                    text_prompt = (
+                        "You are given extracted text from a medication label. "
+                        "Extract the following fields and return ONLY a JSON object with these keys:\n"
+                        "{\n"
+                        "  \"medicationName\": string,\n"
+                        "  \"genericName\": string,\n"
+                        "  \"dosage\": string,\n"
+                        "  \"frequency\": string,\n"
+                        "  \"instructions\": [string],\n"
+                        "  \"warnings\": [string],\n"
+                        "  \"sideEffects\": [string],\n"
+                        "  \"plainLanguage\": string\n"
+                        "}\n"
+                        "If a field is missing, return an empty string or empty list. Output valid JSON only.\n\n"
+                        "Here is the extracted text:\n\n"
+                    ) + ocr_text
+
+                    text_response = text_model.generate_content(text_prompt)
+                    text_model_output = getattr(text_response, "text", None) or str(text_response)
+
+                    try:
+                        parsed_from_text = json.loads(text_model_output)
+                    except Exception:
+                        m2 = re.search(r"\{[\s\S]*\}", text_model_output)
+                        if m2:
+                            try:
+                                parsed_from_text = json.loads(m2.group(0))
+                            except Exception:
+                                parsed_from_text = None
+                except Exception as tex:
+                    text_model_error = str(tex)
+
+            # prefer parsed_from_text, then heuristic_parsed
+            final_parsed = parsed_from_text or heuristic_parsed
+
             return {
-                "text": {"error": str(e), "available_models": models},
+                "text": {
+                    "error": str(e),
+                    "available_models": models,
+                    "ocr_text": ocr_text,
+                    "ocr_error": ocr_error,
+                    "ocr_parsed": final_parsed,
+                    "text_model_output": text_model_output,
+                    "text_model_error": text_model_error,
+                },
                 "raw_output": {"error": str(e)},
             }
         # Other exceptions - re-raise
@@ -216,6 +320,53 @@ async def analyze_meds(image_path: str):
 
         if ocr_text:
             heuristic_parsed = heuristic_parse(ocr_text)
+
+            # Try to call a text-capable Gemini model on the OCR text to produce strict JSON
+            try:
+                # Use default text-capable model (SDK default) which typically supports text generation
+                text_model = genai.GenerativeModel()
+                text_prompt = (
+                    "You are given extracted text from a medication label. "
+                    "Extract the following fields and return ONLY a JSON object with these keys:\n"
+                    "{\n"
+                    "  \"medicationName\": string,\n"
+                    "  \"genericName\": string,\n"
+                    "  \"dosage\": string,\n"
+                    "  \"frequency\": string,\n"
+                    "  \"instructions\": [string],\n"
+                    "  \"warnings\": [string],\n"
+                    "  \"sideEffects\": [string],\n"
+                    "  \"plainLanguage\": string\n"
+                    "}\n"
+                    "If a field is missing, return an empty string or empty list. Output valid JSON only.\n\n"
+                    "Here is the extracted text:\n\n"
+                ) + ocr_text
+
+                text_response = text_model.generate_content(text_prompt)
+                # Prefer text attribute
+                text_raw = getattr(text_response, "text", None) or str(text_response)
+
+                # Attempt to parse the model's output as JSON
+                parsed_from_text = None
+                try:
+                    parsed_from_text = json.loads(text_raw)
+                except Exception:
+                    m2 = re.search(r"\{[\s\S]*\}", text_raw)
+                    if m2:
+                        try:
+                            parsed_from_text = json.loads(m2.group(0))
+                        except Exception:
+                            parsed_from_text = None
+
+                if parsed_from_text:
+                    heuristic_parsed = parsed_from_text
+                    # include the text model raw output into diagnostics
+                    resp_dict = resp_dict or {}
+                    resp_dict["text_model_output"] = text_raw
+            except Exception as tex:
+                # If text model fails, keep heuristic_parsed and note the error in diagnostics
+                resp_dict = resp_dict or {}
+                resp_dict["text_model_error"] = str(tex)
 
     result_obj = {
         "text": parsed if not (heuristic_parsed and not parsed.get("medicationName")) else heuristic_parsed,
