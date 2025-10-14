@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import cv2
+import vcv2
 import tempfile
 import os
 from services.gemini import analyze_food, analyze_meds

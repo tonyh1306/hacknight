@@ -212,7 +212,7 @@ export default function FoodScannerPage() {
                           <p className="text-sm text-muted-foreground mb-1">
                             Protein
                           </p>
-                          <p className="text-3xl font-bold text-secondary">
+                          <p className="text-3xl font-bold text-primary">
                             {nutritionData.protein}g
                           </p>
                         </div>

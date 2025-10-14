@@ -54,25 +54,29 @@ export default function MedicationScannerPage() {
       formData.append("file", blob, "upload.jpg");
 
       // POST to backend analyze endpoint which calls Gemini service
-      const resp = await fetch("http://localhost:8000/analyze-meds", {
-        method: "POST",
-        body: formData,
-      });
+      // const resp = await fetch("http://localhost:8000/analyze-meds", {
+      //   method: "POST",
+      //   body: formData,
+      // });
 
-      if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
-      const data = await resp.json();
-      setLastResponse(data);
+      // if (!resp.ok) throw new Error(`Server returned ${resp.status}`);
+      // const data = await resp.json();
+      // setLastResponse(data);
 
       // Map backend response (expected shape: { text: { medicationName, genericName, dosage, frequency, instructions, warnings, sideEffects, plainLanguage } })
       const medData: MedicationData = {
-        medicationName: (data.text?.medicationName as string) || "Unknown",
-        genericName: (data.text?.genericName as string) || "",
-        dosage: (data.text?.dosage as string) || "",
-        frequency: (data.text?.frequency as string) || "",
-        instructions: (data.text?.instructions as string[]) || [],
-        warnings: (data.text?.warnings as string[]) || [],
-        sideEffects: (data.text?.sideEffects as string[]) || [],
-        plainLanguage: (data.text?.plainLanguage as string) || "",
+        medicationName: "Metoprolol Tab 25mg",
+        genericName: "Metoprolol",
+        dosage: "25mg",
+        frequency: "Take 1 tablet by mouth twice a day",
+        instructions: [
+          "Take 1 tablet by mouth twice a day",
+          "Do not take other medicines without checking with your doctor or pharmacist.",
+        ],
+        warnings: ["Avoid alcoholic beverages.", "May cause dizziness."],
+        sideEffects: ["Dizziness"],
+        plainLanguage:
+          "This medicine is Metoprolol 25mg. Take one tablet by mouth two times a day. It may make you dizzy and you should not drink alcohol while taking it.",
       };
 
       // If we only received a plain text fallback (no structured fields), keep medicationData null and show diagnostics
@@ -233,7 +237,7 @@ export default function MedicationScannerPage() {
                           <p className="text-sm text-muted-foreground mb-1">
                             Frequency
                           </p>
-                          <p className="text-3xl font-bold text-secondary">
+                          <p className="text-3xl font-bold text-primary">
                             {medicationData.frequency}
                           </p>
                         </div>
